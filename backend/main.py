@@ -1,7 +1,5 @@
 # main.py
-# Bharat FoodTrace Backend - Final Version (Step 1)
-# This file contains the complete FastAPI application logic.
-
+# Bharat FoodTrace Backend - FINAL VERSION WITH BLOCKCHAIN INTEGRATION
 import uvicorn
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -19,9 +17,9 @@ import jwt
 from pydantic_settings import BaseSettings
 import os
 from dotenv import load_dotenv
+from web3 import Web3
 
 # --- 0. Configuration ---
-# Load environment variables from .env file
 load_dotenv()
 
 class Settings(BaseSettings):
@@ -29,8 +27,25 @@ class Settings(BaseSettings):
     SECRET_KEY: str = os.getenv("SECRET_KEY")
     ALGORITHM: str = os.getenv("ALGORITHM", "HS256")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+    # Blockchain settings
+    BLOCKCHAIN_RPC_URL: str = os.getenv("BLOCKCHAIN_RPC_URL")
+    CONTRACT_ADDRESS: str = os.getenv("CONTRACT_ADDRESS")
+    SERVER_PRIVATE_KEY: str = os.getenv("SERVER_PRIVATE_KEY")
+    CHAIN_ID: int = int(os.getenv("CHAIN_ID", 80001)) # Default to Polygon Mumbai Testnet
 
 settings = Settings()
+
+# --- Blockchain Connection ---
+w3 = Web3(Web3.HTTPProvider(settings.BLOCKCHAIN_RPC_URL))
+server_account = w3.eth.account.from_key(settings.SERVER_PRIVATE_KEY)
+
+# Minimal ABI needed for our contract interaction
+contract_abi = [
+    {"name":"recordTraceEvent","type":"function","stateMutability":"nonpayable","inputs":[{"type":"bytes32","name":"_productBatchId"},{"type":"bytes32","name":"_eventHash"}],"outputs":[]},
+    {"name":"EventRecorded","type":"event","inputs":[{"type":"bytes32","name":"productBatchId","indexed":True},{"type":"bytes32","name":"eventHash","indexed":False},{"type":"address","name":"recorder","indexed":False},{"type":"uint256","name":"timestamp","indexed":False}],"anonymous":False}
+]
+contract = w3.eth.contract(address=settings.CONTRACT_ADDRESS, abi=contract_abi)
+
 
 # --- Database Connection ---
 def get_db_connection():
@@ -58,7 +73,6 @@ def create_access_token(data: dict, expires_delta: Optional[datetime.timedelta] 
     return encoded_jwt
 
 def create_hash(data: str):
-    """Creates a SHA-256 hash of the input string."""
     return hashlib.sha256(data.encode()).hexdigest()
 
 # --- 2. Pydantic Data Models ---
@@ -229,10 +243,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
 @app.post("/token", response_model=Token, tags=["Authentication"])
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
-    """
-    Provides a JWT token for a manufacturer.
-    Uses OAuth2PasswordRequestForm, so username is the email.
-    """
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     cursor.execute("SELECT id, hashed_password FROM manufacturers WHERE email = %s", (form_data.username,))
@@ -261,7 +271,7 @@ async def register_consumer(form_data: UserRegister):
     user_id = str(uuid.uuid4())
     hashed_password = get_password_hash(form_data.password)
     empty_profile = SwasthWallet().model_dump_json()
-    
+
     cursor.execute(
         "INSERT INTO consumers (id, email, hashed_password, profile_json) VALUES (%s, %s, %s, %s)",
         (user_id, form_data.email, hashed_password, empty_profile)
@@ -281,7 +291,7 @@ async def login_consumer_for_access_token(form_data: OAuth2PasswordRequestForm =
     conn.close()
     if not user or not verify_password(form_data.password, user['hashed_password']):
         raise HTTPException(status_code=401, detail="Incorrect email or password")
-    
+
     access_token = create_access_token(data={"sub": form_data.username, "scope": "consumer"})
     return {"access_token": access_token, "token_type": "bearer"}
 
@@ -295,7 +305,7 @@ async def read_users_me(current_user_email: str = Depends(get_current_user)):
     conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     profile_data = json.loads(row['profile_json'])
     return User(email=current_user_email, profile=profile_data)
 
@@ -314,7 +324,7 @@ async def update_users_me(wallet: SwasthWallet, current_user_email: str = Depend
 
 async def _get_full_product_details(product_id: str, conn) -> Optional[Product]:
     cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
+
     # Fetch Product
     cursor.execute("SELECT * FROM products WHERE id = %s", (product_id,))
     product_row = cursor.fetchone()
@@ -357,7 +367,7 @@ async def _get_full_product_details(product_id: str, conn) -> Optional[Product]:
     product_data['traceability'] = traceability_log
     product_data['recalls'] = recalls
     product_data['reviews'] = reviews
-    
+
     return Product(**product_data)
 
 
@@ -365,14 +375,14 @@ async def _get_full_product_details(product_id: str, conn) -> Optional[Product]:
 async def add_product(product_data: ProductCreate, current_user_email: str = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
+
     cursor.execute("SELECT id FROM manufacturers WHERE email = %s", (current_user_email,))
     manufacturer_id_tuple = cursor.fetchone()
     if not manufacturer_id_tuple:
         cursor.close()
         conn.close()
         raise HTTPException(status_code=403, detail="Invalid manufacturer credentials")
-    
+
     manufacturer_id = manufacturer_id_tuple['id']
     product_id = f"BFT_{product_data.batch_number.replace(' ','')}_{uuid.uuid4().hex[:6].upper()}"
 
@@ -410,7 +420,7 @@ async def add_product(product_data: ProductCreate, current_user_email: str = Dep
         first_event_location = f"Manufacturing Unit, {product_data.brand}"
         genesis_hash_data = f"{product_id}{timestamp.isoformat()}{first_event_location}manufacturing{current_user_email}0"
         genesis_hash = create_hash(genesis_hash_data)
-        
+
         cursor.execute(
             'INSERT INTO traceability_log (product_id, timestamp, location, stage, actor, status, notes, previous_hash, current_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)',
             (product_id, timestamp, first_event_location, "manufacturing", current_user_email, "Completed", "Product created.", "0", genesis_hash)
@@ -440,25 +450,25 @@ async def get_product(product_id: str):
 async def get_manufacturer_products(current_user_email: str = Depends(get_current_user)):
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
+
     cursor.execute("SELECT id FROM manufacturers WHERE email = %s", (current_user_email,))
     manufacturer_id_tuple = cursor.fetchone()
     if not manufacturer_id_tuple:
         cursor.close()
         conn.close()
         raise HTTPException(status_code=403, detail="Invalid manufacturer")
-    
+
     manufacturer_id = manufacturer_id_tuple['id']
     cursor.execute("SELECT id FROM products WHERE manufacturer_id = %s", (manufacturer_id,))
     product_ids = [row['id'] for row in cursor.fetchall()]
     cursor.close()
-    
+
     products = []
     for product_id in product_ids:
         product = await _get_full_product_details(product_id, conn)
         if product:
             products.append(product)
-            
+
     conn.close()
     return products
 
@@ -466,20 +476,20 @@ async def get_manufacturer_products(current_user_email: str = Depends(get_curren
 async def add_traceability_event(update_data: LocationUpdate):
     conn = get_db_connection()
     cursor = conn.cursor(cursor_factory=RealDictCursor)
-    
+
     cursor.execute("SELECT current_hash FROM traceability_log WHERE product_id = %s ORDER BY log_id DESC LIMIT 1", (update_data.product_id,))
     last_hash_row = cursor.fetchone()
     if not last_hash_row:
         cursor.close()
         conn.close()
         raise HTTPException(status_code=404, detail="Product ID not found or has no initial log.")
-    
+
     previous_hash = last_hash_row['current_hash']
     timestamp = datetime.datetime.now(datetime.timezone.utc)
-    
+
     hash_data = f"{update_data.product_id}{timestamp.isoformat()}{update_data.location}{update_data.stage}{update_data.actor}{previous_hash}"
     current_hash = create_hash(hash_data)
-
+    log_id = None
     try:
         cursor.execute(
             'INSERT INTO traceability_log (product_id, timestamp, location, stage, actor, status, notes, previous_hash, current_hash) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING log_id',
@@ -490,9 +500,43 @@ async def add_traceability_event(update_data: LocationUpdate):
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
+    
+    # --- BLOCKCHAIN INTERACTION ---
+    try:
+        # Prepare data for smart contract (needs to be bytes32)
+        product_batch_id_bytes = hashlib.sha256(update_data.product_id.encode()).digest()
+        event_hash_bytes = bytes.fromhex(current_hash)
+
+        # Build and send the transaction
+        nonce = w3.eth.get_transaction_count(server_account.address)
+        tx_data = contract.functions.recordTraceEvent(product_batch_id_bytes, event_hash_bytes).build_transaction({
+            'chainId': settings.CHAIN_ID,
+            'gas': 2000000,
+            'gasPrice': w3.eth.gas_price,
+            'from': server_account.address,
+            'nonce': nonce,
+        })
+        signed_tx = w3.eth.account.sign_transaction(tx_data, private_key=settings.SERVER_PRIVATE_KEY)
+        tx_hash = w3.eth.send_raw_transaction(signed_tx.rawTransaction)
+        
+        # Wait for transaction receipt (optional but good practice)
+        tx_receipt = w3.eth.wait_for_transaction_receipt(tx_hash)
+        
+        # Update the database with the transaction hash
+        cursor.execute(
+            'UPDATE traceability_log SET blockchain_tx_id = %s WHERE log_id = %s',
+            (tx_receipt.transactionHash.hex(), log_id)
+        )
+        conn.commit()
+
+    except Exception as e:
+        # If blockchain fails, we don't fail the whole request, but we can log it.
+        # In a real production system, you'd add this to a retry queue.
+        print(f"!!! BLOCKCHAIN ERROR !!!: Could not anchor event for log_id {log_id}. Error: {e}")
     finally:
         cursor.close()
         conn.close()
+
 
     return TraceabilityEntry(
         log_id=log_id,
@@ -504,11 +548,11 @@ async def add_traceability_event(update_data: LocationUpdate):
         status=update_data.status,
         notes=update_data.notes,
         previous_hash=previous_hash,
-        current_hash=current_hash
+        current_hash=current_hash,
+        blockchain_tx_id = tx_receipt.transactionHash.hex() if 'tx_receipt' in locals() else None
     )
 
 # --- 6. Recalls and Reviews Endpoints ---
-
 @app.post("/recalls/add", response_model=ProductRecall, status_code=status.HTTP_201_CREATED, tags=["Recalls"])
 async def add_recall(recall_data: ProductRecallCreate, current_user_email: str = Depends(get_current_user)):
     conn = get_db_connection()
@@ -584,6 +628,5 @@ async def get_reviews_for_product(product_id: str):
 
 # --- Main Execution ---
 if __name__ == "__main__":
-    # Note: The database setup is handled by the `database_setup.sql` script now.
     print("Starting Bharat FoodTrace API Server...")
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

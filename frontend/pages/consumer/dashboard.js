@@ -178,7 +178,7 @@ export default function ConsumerDashboard() {
                 return <Loader />;
         }
     };
-    
+
     const renderQuizView = () => (
         <div className="fade-in space-y-6">
             <div className="text-center p-6 bg-white rounded-lg shadow-md">
@@ -220,15 +220,15 @@ export default function ConsumerDashboard() {
             </form>
         </div>
     );
-    
+
     const renderScannerView = () => (
         <div className="text-center fade-in space-y-6">
              <div className="bg-green-50 border border-green-200 rounded-lg p-8 flex flex-col items-center shadow-md">
                 <h2 className="text-3xl font-bold text-gray-800 mb-2">Scan Food Products</h2>
                 <p className="text-gray-600 mb-6 max-w-sm">Enter a Product ID below to simulate scanning a QR code.</p>
                  <form onSubmit={(e) => { e.preventDefault(); handleScan(scannerInput); }} className="w-full flex gap-2">
-                    <input 
-                        type="text" 
+                    <input
+                        type="text"
                         value={scannerInput}
                         onChange={(e) => setScannerInput(e.target.value)}
                         placeholder="Paste Product ID here"
@@ -246,7 +246,7 @@ export default function ConsumerDashboard() {
             </div>
         </div>
     );
-    
+
     const renderProfileView = () => (
         <div className="fade-in space-y-6">
             <div className="flex justify-between items-center bg-white p-4 rounded-lg shadow-md">
@@ -264,7 +264,7 @@ export default function ConsumerDashboard() {
                         </>
                     )}
                 </div>
-                
+
                 <BioCard wallet={wallet} isEditing={isEditingProfile} />
                 <HealthCard wallet={wallet} isEditing={isEditingProfile} />
                 <GoalsCard wallet={wallet} isEditing={isEditingProfile} />
@@ -274,7 +274,7 @@ export default function ConsumerDashboard() {
 
     const renderProductView = () => {
         if (!product) return <Loader text="Fetching product data..." />;
-        
+
         const issueTypeClasses = {
             recall: 'text-white bg-red-600',
             danger: 'text-red-800 bg-red-100',
@@ -285,7 +285,7 @@ export default function ConsumerDashboard() {
         return (
             <div className="fade-in space-y-6">
                 <button onClick={() => setView('scanner')} className="w-full bg-gray-200 text-gray-800 font-bold py-2 px-4 rounded-lg hover:bg-gray-300">&larr; Scan Another Product</button>
-                
+
                 <div className="bg-white rounded-lg shadow-md overflow-hidden">
                     <img src={product.image_url} alt={product.name} className="w-full h-48 object-cover"/>
                     <div className="p-6 text-center">
@@ -310,7 +310,7 @@ export default function ConsumerDashboard() {
                 </div>
 
                 <div className="bg-white rounded-lg shadow p-4"><h3 className="font-bold text-lg mb-2">Ingredients</h3><p className="text-gray-600 text-sm">{product.ingredients.join(', ')}</p></div>
-                
+
                 <div className="bg-white rounded-lg shadow p-4"><h3 className="font-bold text-lg mb-2">Nutrition Facts (per 100g)</h3>
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm text-gray-700">
                         <span><strong>Calories:</strong> {product.nutrition.calories_per_100g}</span>
@@ -355,6 +355,16 @@ export default function ConsumerDashboard() {
                                 <p className="font-semibold capitalize">{log.stage}: {log.location}</p>
                                 <p className="text-sm text-gray-500">{new Date(log.timestamp).toLocaleString()} by {log.actor}</p>
                                 {log.notes && <p className="text-sm text-blue-600 mt-1">Notes: {log.notes}</p>}
+                                {log.blockchain_tx_id && (
+                                    <a
+                                        href={`https://mumbai.polygonscan.com/tx/${log.blockchain_tx_id}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold mt-1 block"
+                                    >
+                                        Verify on Polygon
+                                    </a>
+                                )}
                             </li>
                         ))}
                     </ul>
