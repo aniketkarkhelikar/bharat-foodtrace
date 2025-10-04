@@ -1,0 +1,15 @@
+# Ignore a hidden Git directory
+.git/
+
+# Ignore Python specific files
+__pycache__/
+venv/
+
+# Ignore a specific environment file
+.env
+
+# Ignore Next.js build and cache folders
+.next/
+
+# Ignore Node.js dependency directory in the frontend folder
+frontend/node_modules/

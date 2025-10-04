@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+psycopg2-binary
+python-multipart
+passlib[bcrypt]
+python-jose[cryptography]
+pydantic
+pydantic-settings
+python-dotenv
+pyjwt
